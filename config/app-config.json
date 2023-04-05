@@ -1,0 +1,6 @@
+{
+    "server":"127.0.0.1",
+    "port":"9997",
+    "agent-cache-refresh-interval-minutes":1,
+    "bypass-user-check":false
+}

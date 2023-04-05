@@ -1,0 +1,49 @@
+<html>
+
+<body>
+    <h2>LOG SEARCH RESULT</h2>
+    <h3>Application: {{.APP}}</h3>
+    <h4>Search Text: {{.SEARCHTEXT}}</h4>
+    <table width="100%">
+        <tbody>
+            <tr>
+                <td width=" 10%">
+                </td>
+                <td width="70%">
+                    <table border="1">
+                        <tbody>
+                            <tr>
+                                <th>Node</th>
+                                <th>Files where match found</th>
+                            </tr>
+
+                            {{ range .FILEOUTPUTS}}
+                            {{ $save := .}}
+                            <tr>
+                                <td>{{.Node}}</td>
+                                <td>
+                                    {{range .Data}}
+                                    <form method="POST" action="/api/logs/search/lines" target="_blank">
+                                        <input type="hidden" name="app" value="{{$.APP}}" />
+                                        <input type="hidden" name="search-text" value="{{$.SEARCHTEXT}}" />
+                                        <input type="hidden" name="is-reg-ex" value="{{$.ISREGEX}}" />
+                                        <input type="hidden" name="pre-match-lines" value="{{$.PREMATCHLINES}}" />
+                                        <input type="hidden" name="post-match-lines" value="{{$.POSTMATCHLINES}}" />
+                                        <input type="hidden" name="nodes" value="{{$save.Node}}" />
+                                        <input type="hidden" name="logs" value="{{.}}" />
+                                        {{.}} <input type="submit" value="View Logs" />
+                                    </form>
+                                    <hr>
+                                    {{end}}
+                                </td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</body>
+
+</html>
