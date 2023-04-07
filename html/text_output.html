@@ -1,0 +1,23 @@
+<head>
+<script>
+<!-- form submit will open a small popup window and auto close in 1 second -->
+function target_popup(form) {
+    var popupwin = window.open('','formpopup','width=10,height=1,left=5,top=3');
+	form.target = 'formpopup';
+    var doc = popupwin.document;
+    doc.open("text/html");
+    doc.write("auto closing...");
+    doc.close();
+    setTimeout(function() { popupwin.close();}, 1000);
+}
+</script>
+</head>
+<form method="POST" action="/api/logs/command/cancel" target="blank" onsubmit="target_popup(this)" name="formpopup">
+    The operation will auto complete or timeout in 1 minute, to abruptly stop, please click Cancel button
+    <input type="hidden" name="cmd-key" value="{{.KEY}}"/> 
+    <input type="hidden" name="node" value="{{.NODE}}"/> 
+    <input type="submit" value="Cancel"/>
+</form>
+<hr>
+<plaintext>
+{{.BODY}}

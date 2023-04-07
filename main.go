@@ -6,7 +6,8 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"html/template"
 	"io"
 	"log"
 	"net/http"
@@ -23,23 +24,20 @@ import (
 )
 
 var validate *validator.Validate
-var appsListing []string
 
 // app config properties
 type AppConfig struct {
 	Server                    string `json:"server"`
 	Port                      string `json:"port"`
 	AgentCacheRefreshInterval int    `json:"agent-cache-refresh-interval-minutes"`
-	ByPassUserCheck           bool   `json:"bypass-user-check"`
+	UIUserName                string `json:"ui-username"`
+	UIPassword                string `json:"ui-password"`
 }
 
 var appConfig AppConfig
 
-// intializer
+// initializer
 func init() {
-	//set logger
-	setLogger()
-
 	//read app config
 	var content []byte
 	var err error
@@ -51,7 +49,7 @@ func init() {
 	}
 
 	//schedule a task to cleanup dead Agent info,
-	//an agent is considered dead if no hearbeat info received in configured interval.
+	//an agent is considered dead if no heartbeat info received in configured interval.
 	go func() {
 		for {
 			time.Sleep(time.Duration(appConfig.AgentCacheRefreshInterval) * time.Minute)
@@ -65,49 +63,37 @@ func init() {
 		}
 	}()
 
-	//validor framework
+	//validator framework
 	validate = validator.New()
-}
 
-// set logger
-func setLogger() {
-	f, err := os.OpenFile("audit-logger.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("error opening file: %v", err)
-	}
-	log.SetOutput(f)
-	log.Println("********STARTING LOG PARSE UI************")
+	gin.SetMode(gin.ReleaseMode)
 }
 
 // program entry point
 func main() {
 	router := gin.Default()
-	router.LoadHTMLGlob("./config/*.html")
+	router.LoadHTMLGlob("./html/*.html")
 
 	//api without authentication
-	router.GET("/", homePageHandler)
 	router.POST("/api/logs/search/agent/info", logSearchAgentConfigHandler)
 
 	//api with authentication
 	authorized := router.Group("/", gin.BasicAuth(gin.Accounts{
-		"mchopker": "Mahesh@123",
+		appConfig.UIUserName: appConfig.UIPassword,
 	}))
-	authorized.GET("/api/logs/search", captureUserInfo, logSearchFormHandler)
-	authorized.POST("/api/logs/search/files", captureUserInfo, validateLogOperationRequest, logSearchFilesHandler)
-	authorized.POST("/api/logs/search/lines", captureUserInfo, validateLogOperationRequest, logSearchLinesHandler)
-	authorized.POST("/api/logs/tail/files", captureUserInfo, logTailFilesHandler)
-	authorized.POST("/api/logs/command/cancel", captureUserInfo, commandCancelHandler)
+	authorized.GET("/", homePageHandler)
+	authorized.GET("/api/logs/search", logSearchFormHandler)
+	authorized.POST("/api/logs/search/files", validateLogOperationRequest, logSearchFilesHandler)
+	authorized.POST("/api/logs/search/lines", validateLogOperationRequest, logSearchLinesHandler)
+	authorized.POST("/api/logs/tail/files", logTailFilesHandler)
+	authorized.POST("/api/logs/command/cancel", commandCancelHandler)
 
+	log.Printf("***********log-parse-ui UI Starting at:%s:%s\n", appConfig.Server, appConfig.Port)
 	router.Run(appConfig.Server + ":" + appConfig.Port)
-
-	router.NoRoute(func(c *gin.Context) {
-		c.JSON(404, gin.H{"code": "PAGE_NOT_FOUND", "message": "Page not found"})
-	})
 }
 
 // home page handler
 func homePageHandler(c *gin.Context) {
-
 	//prepare the APP listing
 	appMap := make(map[string]struct{})
 	logAgentConfigMap.Range(func(key, value interface{}) bool {
@@ -137,7 +123,6 @@ func logSearchFormHandler(c *gin.Context) {
 		return
 	}
 
-	currentUser, _ := c.Get("UserInfo")
 	nodes := []string{}
 	logs := []string{}
 	tmpLogs := make(map[string]struct{})
@@ -145,15 +130,11 @@ func logSearchFormHandler(c *gin.Context) {
 	//check if App and User is supported
 	logAgentConfigMap.Range(func(key, value interface{}) bool {
 		agentConfigVal := value.(LogAgentConfig)
-		for _, user := range agentConfigVal.UsersSupported {
-			if (appConfig.ByPassUserCheck) || (!appConfig.ByPassUserCheck && strings.Contains(fmt.Sprintf("%v", currentUser), user)) {
-				for _, appConfigVal := range agentConfigVal.AppsSupported {
-					if strings.EqualFold(app, appConfigVal.App) {
-						nodes = append(nodes, agentConfigVal.AgentHost)
-						for _, tmp := range appConfigVal.Logs {
-							tmpLogs[tmp] = struct{}{}
-						}
-					}
+		for _, appConfigVal := range agentConfigVal.AppsSupported {
+			if strings.EqualFold(app, appConfigVal.App) {
+				nodes = append(nodes, agentConfigVal.AgentHost)
+				for _, tmp := range appConfigVal.Logs {
+					tmpLogs[tmp] = struct{}{}
 				}
 			}
 		}
@@ -194,7 +175,7 @@ type appConfiguration struct {
 	AllowDownload     bool     `json:"allow-download"`
 }
 
-// struct to capture logAgentc info
+// struct to capture logAgent info
 type LogAgentConfig struct {
 	UpdateTime     time.Time          `json:"update-time"`
 	AgentHost      string             `json:"agent-host"`
@@ -208,6 +189,8 @@ var logAgentConfigMap sync.Map
 
 // handler to receive and process agent post info
 func logSearchAgentConfigHandler(c *gin.Context) {
+
+	log.Printf("Agent Config Post received...\n")
 	var agentConfig LogAgentConfig
 	err := json.NewDecoder(c.Request.Body).Decode(&agentConfig)
 	if err != nil {
@@ -216,7 +199,7 @@ func logSearchAgentConfigHandler(c *gin.Context) {
 	} else if !strings.EqualFold(agentConfig.AgentHost, "") {
 		log.Printf("Accepted Agent Info:%v", agentConfig)
 
-		//udpate Map
+		//update Map
 		agentConfig.UpdateTime = time.Now()
 		logAgentConfigMap.Store(agentConfig.AgentHost, agentConfig)
 
@@ -229,8 +212,9 @@ func logSearchAgentConfigHandler(c *gin.Context) {
 }
 
 type logAPIOutput struct {
-	Node string   `json:"node"`
-	Data []string `json:"data"`
+	Node  string   `json:"node"`
+	Data  []string `json:"data"`
+	Error string   `json:"error"`
 }
 
 // log search files handler
@@ -369,32 +353,46 @@ func validateLogOperationRequest(c *gin.Context) {
 
 // utility method - API call
 func logAPICall(renderOutput bool, apiContext string, postVal url.Values, nodes []string, c *gin.Context) []logAPIOutput {
-	var outputData []logAPIOutput
+	//make request for each node
+	var wg sync.WaitGroup
+	outputData := make([]logAPIOutput, len(nodes))
+	for i, node := range nodes {
+		wg.Add(1)
 
-	//make reuqest for each node
-	for _, node := range nodes {
-		var resData []byte
-		var err error
-		url := "http://" + node + ":" + getAgentPortByHost(node) + "/api/" + apiContext
+		//slice append is not concurrency safe, so using index to update slice
+		//each go routine will update it's own index in slice
+		go func(index int, node string) {
+			defer wg.Done()
+			var resData []byte
+			var err error
+			url := "http://" + node + ":" + getAgentPortByHost(node) + "/api/" + apiContext
 
-		if renderOutput {
-			err := httpPOSTExecuteAndRender(url, postVal, c)
-			if err != nil {
-				continue
-			}
-		} else {
-			if resData, err = httpPOSTExecute(url, postVal); err != nil {
-				continue
-			}
 			var output logAPIOutput
-			err = json.Unmarshal(resData, &output)
-			if err != nil {
-				continue
-			}
 			output.Node = node
-			outputData = append(outputData, output)
-		}
+			if renderOutput {
+				err := httpPOSTExecuteAndRender(url, postVal, c)
+				if err != nil {
+					output.Error = err.Error()
+				}
+			} else {
+				if resData, err = httpPOSTExecute(url, postVal); err != nil {
+					output.Error = err.Error()
+				} else {
+					if err = json.Unmarshal(resData, &output); err != nil {
+						output.Error = err.Error()
+					}
+				}
+			}
+			outputData[index] = output
+
+			if renderOutput && !strings.EqualFold(output.Error, "") {
+				c.JSON(http.StatusTooManyRequests, gin.H{"error": output.Error})
+			}
+		}(i, node)
+
 	}
+
+	wg.Wait()
 	return outputData
 }
 
@@ -406,6 +404,10 @@ func httpPOSTExecute(urlStr string, v url.Values) ([]byte, error) {
 		return []byte{}, err
 	}
 	defer r.Body.Close()
+
+	if r.StatusCode == http.StatusTooManyRequests {
+		return nil, errors.New("agent returned too many requests error, please wait for previous operations to complete")
+	}
 
 	bodyText, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -422,6 +424,10 @@ func httpPOSTExecuteAndRender(urlStr string, v url.Values, c *gin.Context) error
 		return err
 	}
 	defer r.Body.Close()
+
+	if r.StatusCode == http.StatusTooManyRequests {
+		return errors.New("agent returned too many requests error, please wait for previous operations to complete")
+	}
 
 	urlParsed, err := url.Parse(urlStr)
 	if err != nil {
@@ -440,19 +446,9 @@ func httpPOSTExecuteAndRender(urlStr string, v url.Values, c *gin.Context) error
 		}
 
 		line := scanner.Text()
-		c.HTML(http.StatusOK, "blank.html", gin.H{"BODY": line})
-		c.HTML(http.StatusOK, "blank.html", gin.H{"BODY": "\n"})
+		c.HTML(http.StatusOK, "blank.html", gin.H{"BODY": template.HTML(line) + "\n"})
 		c.Writer.Flush()
 	}
 
 	return nil
-}
-
-// log user
-func captureUserInfo(c *gin.Context) {
-	user, _, hasAuth := c.Request.BasicAuth()
-	if hasAuth {
-		c.Set("UserInfo", user)
-		return
-	}
 }

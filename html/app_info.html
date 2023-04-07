@@ -1,0 +1,22 @@
+<h3>REMOTE LOG PARSING UI</h3>
+<style>
+    .center {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 200px;
+        border: 3px solid green;
+    }
+</style>
+
+<div class="center">
+    <form action="/api/logs/search" method="GET" target="_blank" tyle="justify-content:center; display: flex;">
+        Select Application for Log Parsing:  <select name="APP" id="APP" style="width:260px">
+        {{range .Apps}}
+            <option value="{{.}}">{{.}}</option>
+        {{end}}
+        </select>
+        <button>Submit</button>
+    </form>
+
+</div>
